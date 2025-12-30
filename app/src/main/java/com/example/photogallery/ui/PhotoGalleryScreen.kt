@@ -30,6 +30,17 @@ import com.example.photogallery.db.DatabaseProvider
 import com.example.photogallery.db.FavoritePhoto
 import com.example.photogallery.db.FavoritePhotoDao
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 class PhotoGalleryViewModel : ViewModel() {
     lateinit var dao: FavoritePhotoDao
@@ -49,6 +60,12 @@ class PhotoGalleryViewModel : ViewModel() {
                     imageUrl = photo.imageUrl
                 )
             )
+        }
+    }
+
+    fun removeFromFavorites(photo: PhotoItem) {
+        viewModelScope.launch {
+            dao.deleteById(photo.id)
         }
     }
 
@@ -89,6 +106,10 @@ class PhotoGalleryViewModel : ViewModel() {
     fun searchPhotos(query: String) {
         viewModelScope.launch {
             try {
+                if (query.isBlank()) {
+                    loadPhotos() // возвращаем дефолтный список
+                    return@launch
+                }
                 val response = PhotoRepository.api.searchPhotos(
                     apiKey = "c19cc8f4173598aa3908927fd6adbe88",
                     text = query
@@ -104,6 +125,19 @@ class PhotoGalleryViewModel : ViewModel() {
             }
         }
     }
+
+    suspend fun toggleFavorite(photo: PhotoItem): List<FavoritePhoto> {
+        val currentFavorites = dao.getAll().toMutableList()
+        val exists = currentFavorites.any { it.id == photo.id }
+        if (exists) {
+            dao.deleteById(photo.id)
+            currentFavorites.removeAll { it.id == photo.id }
+        } else {
+            dao.insert(FavoritePhoto(photo.id, photo.title, photo.imageUrl ?: ""))
+            currentFavorites.add(FavoritePhoto(photo.id, photo.title, photo.imageUrl ?: ""))
+        }
+        return currentFavorites
+    }
 }
 
 @Composable
@@ -114,17 +148,43 @@ fun PhotoGalleryScreen(
     var showFavorites by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
+    var favorites by remember { mutableStateOf<List<FavoritePhoto>>(emptyList()) }
+    var showPhotoDialog by remember { mutableStateOf<PhotoItem?>(null) }
+
+    showPhotoDialog?.let { photo ->
+        AlertDialog(
+            onDismissRequest = { showPhotoDialog = null },
+            title = { Text(photo.title) },
+            text = {
+                Column {
+                    AsyncImage(
+                        model = photo.imageUrl,
+                        contentDescription = photo.title,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPhotoDialog = null }) {
+                    Text("Закрыть")
+                }
+            }
+        )
+    }
+    LaunchedEffect(Unit) {
+        favorites = viewModel.getFavorites()
+    }
     Scaffold(
         topBar = {
             PhotoGalleryTopBar(
-                onSearchClick = {
-                    showSearchDialog = true
-                },
-                onFavoritesClick = {
-                    showFavorites = !showFavorites
-                },
+                onSearchClick = { showSearchDialog = true },
+                onFavoritesClick = { showFavorites = !showFavorites },
                 onClearClick = {
                     viewModel.clearFavorites()
+                    favorites = emptyList()
                 }
             )
         }
@@ -155,59 +215,73 @@ fun PhotoGalleryScreen(
                 }
             )
         }
-        if (showFavorites) {
-            FavoritesScreen(
-                modifier = Modifier.padding(paddingValues),
-                viewModel = viewModel
-            )
-        } else {
-            PhotoList(
-                photos = photos,
-                modifier = Modifier.padding(paddingValues),
-                onPhotoClick = { viewModel.addToFavorites(it) }
-            )
-        }
+        val displayPhotos = if (showFavorites) {
+            favorites.map { PhotoItem(it.id, it.title, it.imageUrl) }
+        } else photos
+
+        val scope = rememberCoroutineScope()
+
+        PhotoList(
+            photos = displayPhotos,
+            favorites = favorites,
+            modifier = Modifier.padding(paddingValues),
+            onPhotoClick = { photo -> showPhotoDialog = photo },
+            onFavoriteToggle = { photo ->
+                scope.launch {
+                    val updatedFavorites = viewModel.toggleFavorite(photo)
+                    favorites = updatedFavorites
+                }
+            }
+        )
     }
 }
 
 @Composable
 fun PhotoList(
     photos: List<PhotoItem>,
+    favorites: List<FavoritePhoto>,
     modifier: Modifier = Modifier,
-    onPhotoClick: (PhotoItem) -> Unit
+    onPhotoClick: (PhotoItem) -> Unit,
+    onFavoriteToggle: (PhotoItem) -> Unit,
 ) {
-    LazyColumn(
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
         modifier = modifier
             .fillMaxSize()
             .background(Color.Gray)
-            .padding(8.dp)
+            .padding(8.dp),
+        contentPadding = PaddingValues(4.dp)
     ) {
-        if (photos.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillParentMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Загрузка...",
-                        color = Color.White
-                    )
-                }
-            }
-        } else {
-            items(photos) { photo ->
+        items(photos) { photo ->
+            Box(
+                modifier = Modifier
+                    .padding(4.dp)
+                    .clickable { onFavoriteClick(photo) }
+            ) {
                 AsyncImage(
                     model = photo.imageUrl,
                     contentDescription = photo.title,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp)
-                        .padding(vertical = 6.dp)
-                        .clickable {
-                            onPhotoClick(photo)
-                        }
+                        .height(200.dp),
+                    contentScale = ContentScale.Crop
                 )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(5.dp)
+                        .size(30.dp)
+                        .background(Color.White.copy(alpha = 0.7f), shape = CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = "Favorite",
+                        tint = if (favorites.any { it.id == photo.id }) Color.Red else Color.Gray,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(20.dp)
+                    )
+                }
             }
         }
     }
@@ -224,26 +298,60 @@ fun FavoritesScreen(
         favorites = viewModel.getFavorites()
     }
 
-    LazyColumn(
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
         modifier = modifier
             .fillMaxSize()
             .background(Color.DarkGray)
-            .padding(8.dp)
+            .padding(8.dp),
+        contentPadding = PaddingValues(4.dp)
     ) {
         if (favorites.isEmpty()) {
             item {
-                Text("Избранного нет", color = Color.White)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Избранного нет", color = Color.White)
+                }
             }
         } else {
             items(favorites) { photo ->
-                AsyncImage(
-                    model = photo.imageUrl,
-                    contentDescription = photo.title,
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .padding(vertical = 6.dp)
-                )
+                        .padding(4.dp)
+                        .clickable {
+//                        if (favorites.any { it.id == photo.id }) {
+//                            onRemoveFavorite(photo)
+//                        } else {
+//                            onFavoriteClick(photo)
+//                        }
+//                    }
+                            .pointerInput(photo.id) {
+                            detectTapGestures(
+                                onTap = { onPhotoClick(photo) },
+                                onDoubleTap = { onFavoriteToggle(photo) }
+                            )
+                        }
+                ) {
+                    AsyncImage(
+                        model = photo.imageUrl,
+                        contentDescription = photo.title,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                    Icon(
+                        Icons.Default.Favorite,
+                        contentDescription = "Favorite",
+                        tint = Color.Red,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color.White.copy(alpha = 0.7f), shape = CircleShape)
+                    )
+                }
             }
         }
     }
