@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
+
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 
@@ -78,8 +79,10 @@ class PhotoGalleryViewModel : ViewModel() {
     suspend fun getFavorites(): List<FavoritePhoto> {
         return dao.getAll()
     }
+
     private val _photos = MutableStateFlow<List<PhotoItem>>(emptyList())
     val photos: StateFlow<List<PhotoItem>> = _photos
+
 
     init {
         loadPhotos()
@@ -103,6 +106,7 @@ class PhotoGalleryViewModel : ViewModel() {
             }
         }
     }
+
     fun searchPhotos(query: String) {
         viewModelScope.launch {
             try {
@@ -149,6 +153,7 @@ fun PhotoGalleryScreen(
     var showSearchDialog by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
     var favorites by remember { mutableStateOf<List<FavoritePhoto>>(emptyList()) }
+
     var showPhotoDialog by remember { mutableStateOf<PhotoItem?>(null) }
 
     showPhotoDialog?.let { photo ->
@@ -174,9 +179,11 @@ fun PhotoGalleryScreen(
             }
         )
     }
+
     LaunchedEffect(Unit) {
         favorites = viewModel.getFavorites()
     }
+
     Scaffold(
         topBar = {
             PhotoGalleryTopBar(
@@ -215,9 +222,29 @@ fun PhotoGalleryScreen(
                 }
             )
         }
+
         val displayPhotos = if (showFavorites) {
             favorites.map { PhotoItem(it.id, it.title, it.imageUrl) }
         } else photos
+
+//        PhotoList(
+//            photos = displayPhotos,
+//            favorites = favorites,
+//            modifier = Modifier.padding(paddingValues),
+//            onFavoriteClick = { photo ->
+//                viewModel.addToFavorites(photo)
+//                if (favorites.none { it.id == photo.id }) {
+//                    favorites = favorites + FavoritePhoto(photo.id, photo.title, photo.imageUrl ?: "")
+//                }
+//            },
+//            onRemoveFavorite = { photo ->
+//                viewModel.removeFromFavorites(photo)
+//                favorites = favorites.filter { it.id != photo.id }
+//            },
+//            onPhotoClick = { photo ->
+//                showPhotoDialog = photo
+//            }
+//        )
 
         val scope = rememberCoroutineScope()
 
@@ -241,9 +268,13 @@ fun PhotoList(
     photos: List<PhotoItem>,
     favorites: List<FavoritePhoto>,
     modifier: Modifier = Modifier,
+//    onFavoriteClick: (PhotoItem) -> Unit,
+//    onRemoveFavorite: (PhotoItem) -> Unit,
     onPhotoClick: (PhotoItem) -> Unit,
     onFavoriteToggle: (PhotoItem) -> Unit,
 ) {
+    // val scope = rememberCoroutineScope()
+
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
         modifier = modifier
@@ -256,7 +287,19 @@ fun PhotoList(
             Box(
                 modifier = Modifier
                     .padding(4.dp)
-                    .clickable { onFavoriteClick(photo) }
+//                    .clickable {
+//                        if (favorites.any { it.id == photo.id }) {
+//                            onRemoveFavorite(photo)
+//                        } else {
+//                            onFavoriteClick(photo)
+//                        }
+//                    }
+                    .pointerInput(photo.id) {
+                        detectTapGestures(
+                            onTap = { onPhotoClick(photo) },
+                            onDoubleTap = { onFavoriteToggle(photo) }
+                        )
+                    }
             ) {
                 AsyncImage(
                     model = photo.imageUrl,
@@ -266,6 +309,7 @@ fun PhotoList(
                         .height(200.dp),
                     contentScale = ContentScale.Crop
                 )
+
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -286,6 +330,7 @@ fun PhotoList(
         }
     }
 }
+
 
 @Composable
 fun FavoritesScreen(
@@ -320,19 +365,6 @@ fun FavoritesScreen(
                 Box(
                     modifier = Modifier
                         .padding(4.dp)
-                        .clickable {
-//                        if (favorites.any { it.id == photo.id }) {
-//                            onRemoveFavorite(photo)
-//                        } else {
-//                            onFavoriteClick(photo)
-//                        }
-//                    }
-                            .pointerInput(photo.id) {
-                            detectTapGestures(
-                                onTap = { onPhotoClick(photo) },
-                                onDoubleTap = { onFavoriteToggle(photo) }
-                            )
-                        }
                 ) {
                     AsyncImage(
                         model = photo.imageUrl,
