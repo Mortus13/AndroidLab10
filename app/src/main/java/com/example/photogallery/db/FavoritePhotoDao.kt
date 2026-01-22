@@ -2,6 +2,7 @@ package com.example.photogallery.db
 
 import androidx.room.*
 
+
 @Dao
 interface FavoritePhotoDao {
     @Query("SELECT * FROM favorite_photos")
